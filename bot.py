@@ -13,34 +13,26 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب لإبقاء الخدمة نشطة على Render
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Ai Joud Multi-Model is Live!"
+    return "Ai Joud Multi-Model is Active!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# جلب المفاتيح
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# إعداد اتصال OpenRouter
 client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
 )
 
-# قائمة النماذج المجانية والمستقرة (Gemini + Llama + نماذج أخرى)
-# يقوم OpenRouter بالتبديل التلقائي إذا واجه أي نموذج ضغطاً
-PRIMARY_MODEL = "google/gemini-2.0-flash-exp:free"
-FALLBACK_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemini-flash-1.5:free"
-]
+# نماذج مجانية فائقة الاستقرار والسرعة على OpenRouter
+TARGET_MODEL = "meta-llama/llama-3.2-3b-instruct:free"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
@@ -55,20 +47,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        # استدعاء النموذج مع التبديل التلقائي الاحتياطي
         response = await client.chat.completions.create(
             extra_headers={
                 "HTTP-Referer": "https://render.com",
                 "X-Title": "Ai Joud Bot",
             },
-            model=PRIMARY_MODEL,
-            messages=[{"role": "user", "content": user_text}],
-            extra_body={"models": FALLBACK_MODELS}
+            model=TARGET_MODEL,
+            messages=[{"role": "user", "content": user_text}]
         )
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
     except Exception as e:
-        await update.message.reply_text("عذراً، يرجى إعادة المحاولة بعد لحظات.")
+        # طباعة الخطأ في تلغرام لمعرفة السبب بدقة
+        await update.message.reply_text(f"خطأ OpenRouter: {e}")
         print(f"Text Error: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -85,7 +76,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "HTTP-Referer": "https://render.com",
                 "X-Title": "Ai Joud Bot",
             },
-            model="google/gemini-2.0-flash-exp:free",
+            model=TARGET_MODEL,
             messages=[
                 {
                     "role": "user",
@@ -102,7 +93,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
     except Exception as e:
-        await update.message.reply_text("تعذر تحليل الصورة، حاول مرة أخرى.")
+        await update.message.reply_text(f"خطأ تحليل الصورة: {e}")
         print(f"Photo Error: {e}")
 
 if __name__ == "__main__":

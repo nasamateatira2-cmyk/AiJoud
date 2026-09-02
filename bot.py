@@ -1,4 +1,5 @@
 import os
+import asyncio
 import threading
 from io import BytesIO
 from PIL import Image
@@ -13,7 +14,7 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب صغير للخطة المجانية على Render
+# خادم ويب لإبقاء الخدمة نشطة على Render
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -24,30 +25,30 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# جلب المفاتيح
+# المفاتيح
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # إعداد العميل
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# قائمة النماذج لتجنب ضغط الخوادم (إذا انشغل الأول يعمل الثاني فوراً)
-CANDIDATE_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
+# النموذج المطلوب من جوجل
+TARGET_MODEL = "gemini-3.6-flash"
 
-async def call_gemini(contents):
-    """دالة ذكية تحاول توليد الرد، وإذا كان هناك ضغط تجرب نموذجاً بديلاً"""
-    last_error = None
-    for model_name in CANDIDATE_MODELS:
+async def generate_with_retry(contents, retries=3):
+    """إعادة المحاولة تلقائياً في حال وجود ضغط مؤقت 503"""
+    for attempt in range(retries):
         try:
             response = await ai_client.aio.models.generate_content(
-                model=model_name,
+                model=TARGET_MODEL,
                 contents=contents,
             )
             return response.text
         except Exception as e:
-            last_error = e
-            continue
-    raise last_error
+            if "503" in str(e) and attempt < retries - 1:
+                await asyncio.sleep(2) # انتظار ثانيتين وإعادة المحاولة
+                continue
+            raise e
 
 # رسالة البداية
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,18 +59,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_text)
 
-# الرد على النصوص
+# معالجة النصوص
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        reply_text = await call_gemini(user_text)
-        await update.message.reply_text(reply_text)
+        reply = await generate_with_retry(user_text)
+        await update.message.reply_text(reply)
     except Exception as e:
-        await update.message.reply_text("الخوادم عليها ضغط حالياً، أعد المحاولة بعد ثوانٍ.")
+        await update.message.reply_text(f"تنبيه من الخادم: {e}")
         print(f"Error text: {e}")
 
-# الرد على الصور
+# معالجة الصور
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل"
     try:
@@ -78,10 +79,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_bytes = await photo_file.download_as_bytearray()
         image = Image.open(BytesIO(photo_bytes))
 
-        reply_text = await call_gemini([user_caption, image])
-        await update.message.reply_text(reply_text)
+        reply = await generate_with_retry([user_caption, image])
+        await update.message.reply_text(reply)
     except Exception as e:
-        await update.message.reply_text("تعذر تحليل الصورة حالياً، أعد المحاولة بعد قليل.")
+        await update.message.reply_text(f"تنبيه عند تحليل الصورة: {e}")
         print(f"Error photo: {e}")
 
 if __name__ == "__main__":

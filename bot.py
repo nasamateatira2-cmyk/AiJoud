@@ -13,25 +13,25 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب صغير لإبقاء الخدمة نشطة على Render
+# خادم ويب صغير للخطة المجانية على Render
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Ai Joud is Running!"
+    return "Ai Joud is Live!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# جلب المفاتيح
+# جلب المفاتيح من Render
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# إعداد عميل Gemini الجديد
+# تشغيل العميل الجديد لمفاتيح AQ
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# أمر البداية
+# رسالة البداية
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         "اهلا وسهلا بك يا غالي في بوت الذكاء الصناعي Ai Joud \n"
@@ -40,7 +40,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_text)
 
-# معالجة النصوص
+# الرد على الرسائل النصية
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     try:
@@ -54,7 +54,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("حدث خطأ أثناء معالجة الرد، يرجى المحاولة لاحقاً.")
         print(f"Error text: {e}")
 
-# معالجة الصور
+# الرد على الصور
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل"
     try:
@@ -80,5 +80,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud is live...")
+    print("Ai Joud is active...")
     app.run_polling()

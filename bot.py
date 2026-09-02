@@ -2,6 +2,8 @@ import os
 import re
 import threading
 import urllib.parse
+import base64
+from collections import defaultdict
 from flask import Flask
 from openai import AsyncOpenAI
 from telegram import Update
@@ -18,13 +20,13 @@ web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Ai Joud Multi-Model & Auto Image is Live!"
+    return "Ai Joud Pro is Live & Fast!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# المفاتيح
+# جلب المفاتيح
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
@@ -33,19 +35,34 @@ client = AsyncOpenAI(
     api_key=OPENROUTER_API_KEY,
 )
 
+# نموذج التوجيه الذكي
 TARGET_MODEL = "openrouter/auto"
 
-# رسالة الترحيب
+# ذاكرة المحادثات لكل مستخدم (نحتفظ بآخر 6 رسائل لضمان السرعة والذكاء)
+user_memory = defaultdict(list)
+MAX_HISTORY = 6
+
+# رسالة البداية
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_memory[user_id].clear()
     welcome_text = (
-        "اهلا وسهلا بك يا غالي في بوت الذكاء الصناعي Ai Joud \n"
-        "الاحدث والمبني على احدث انظمة الذكاء الصناعي العالمي.\n\n"
-        "💡 اسألني عن أي موضوع تريده، وسأجيبك فوراً.\n"
-        "🎨 لتصميم صورة، فقط قل: **صمم صورة...** أو **ارسم لي...** متبوعة بوصف ما تريد!"
+        "اهلا وسهلا بك يا غالي في بوت الذكاء الصناعي Ai Joud 🌟\n\n"
+        "⚡️ **القدرات المتاحة:**\n"
+        "💬 **سياق ذكي:** أتذكر سياق حديثك وأفهم ما تشير إليه.\n"
+        "🎨 **تصميم صور:** قل لي مباشرة: *صمم صورة سيارة حديثة* وسأرسمها فوراً.\n"
+        "🖼️ **تحليل الصور:** أرسل أي صورة وسأشرح محتواها وأجيب عن أسئلتك حولها.\n"
+        "🔄 **بدء موضوع جديد:** أرسل الأمر /reset في أي وقت."
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
-# دالة توليد الصور
+# تصفير الذاكرة
+async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_memory[user_id].clear()
+    await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، يمكنك الآن بدء محادثة في موضوع جديد!")
+
+# توليد الصور
 async def generate_and_send_image(prompt: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
@@ -58,14 +75,14 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
             parse_mode="Markdown"
         )
     except Exception as e:
-        await update.message.reply_text(f"تعذر توليد الصورة: {e}")
-        print(f"Draw Error: {e}")
+        await update.message.reply_text(f"تعذر تصميم الصورة: {e}")
 
-# معالجة النصوص والتعرف التلقائي على طلبات التصميم
+# معالجة النصوص والمحادثات مع الذاكرة
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     user_text = update.message.text.strip()
-    
-    # قائمة الكلمات المفتاحية لطلب الصور
+
+    # فحص ما إذا كان النص طلباً لرسم صورة
     image_triggers = [
         r"^(صمم|صمملي|صمم لي)\s+(صورة|صوره)?\s*(.*)",
         r"^(ارسم|ارسملي|ارسم لي)\s+(صورة|صوره)?\s*(.*)",
@@ -77,42 +94,92 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for pattern in image_triggers:
         match = re.match(pattern, user_text, re.IGNORECASE)
         if match:
-            # استخراج وصف الصورة بعد كلمات الطلب
-            detected_prompt = match.groups()[-1].strip()
-            # إذا كتب فقط "صمم صورة" بدون تكملة
-            if not detected_prompt:
-                detected_prompt = user_text
+            detected_prompt = match.groups()[-1].strip() or user_text
             break
 
-    # إذا كانت الرسالة طلباً لتصميم صورة
     if detected_prompt:
         await generate_and_send_image(detected_prompt, update, context)
         return
 
-    # إذا كانت رسالة محادثة أو سؤال عادي
+    # إجراء المحادثة بالاعتماد على سياق الذاكرة
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        # إضافة رسالة المستخدم للسياق
+        user_memory[user_id].append({"role": "user", "content": user_text})
         
+        # حصر الذاكرة في آخر 6 رسائل
+        if len(user_memory[user_id]) > MAX_HISTORY:
+            user_memory[user_id] = user_memory[user_id][-MAX_HISTORY:]
+
+        messages = [
+            {"role": "system", "content": "أنت مساعد ذكي ولطيف اسمه Ai Joud. تجيب بدقة ووضوح وباللغة العربية الفصحى أو بلهجة المستخدم الودية."}
+        ] + user_memory[user_id]
+
         response = await client.chat.completions.create(
             extra_headers={
                 "HTTP-Referer": "https://render.com",
-                "X-Title": "Ai Joud Bot",
+                "X-Title": "Ai Joud Pro Bot",
             },
             model=TARGET_MODEL,
-            messages=[{"role": "user", "content": user_text}]
+            messages=messages
+        )
+        
+        reply = response.choices[0].message.content
+        
+        # حفظ رد البوت في الذاكرة لتكملة السياق
+        user_memory[user_id].append({"role": "assistant", "content": reply})
+        await update.message.reply_text(reply)
+
+    except Exception as e:
+        await update.message.reply_text(f"حدث خطأ أثناء المعالجة: {e}")
+        print(f"Chat Error: {e}")
+
+# معالجة وتحليل الصور المرسلة
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل والوضوح، واذكر أهم العناصر الظاهرة فيها."
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+        base64_image = base64.b64encode(photo_bytes).decode('utf-8')
+
+        response = await client.chat.completions.create(
+            extra_headers={
+                "HTTP-Referer": "https://render.com",
+                "X-Title": "Ai Joud Pro Bot",
+            },
+            model=TARGET_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_caption},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                        }
+                    ]
+                }
+            ]
         )
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
+
     except Exception as e:
-        await update.message.reply_text(f"خطأ: {e}")
-        print(f"Text Error: {e}")
+        await update.message.reply_text(f"تعذر تحليل الصورة: {e}")
+        print(f"Photo Analysis Error: {e}")
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
 
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("reset", reset_memory))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud Smart Bot Running...")
+    print("Ai Joud Pro is running with Memory, Vision & Image Generation...")
     app.run_polling(drop_pending_updates=True)
+

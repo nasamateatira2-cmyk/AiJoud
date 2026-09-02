@@ -28,8 +28,11 @@ def run_web():
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# إعداد العميل غير المتزامن (Async) ليتوافق تماماً مع تلغرام
+# إعداد العميل غير المتزامن
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
+
+# النموذج المطلوب من جوجل
+MODEL_NAME = "gemini-3.6-flash"
 
 # رسالة البداية
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -46,9 +49,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        # استدعاء غير متزامن باستخدام aio لتفادي تجميد البوت
         response = await ai_client.aio.models.generate_content(
-            model="gemini-2.5-flash",
+            model=MODEL_NAME,
             contents=user_text,
         )
         await update.message.reply_text(response.text)
@@ -66,7 +68,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image = Image.open(BytesIO(photo_bytes))
 
         response = await ai_client.aio.models.generate_content(
-            model="gemini-2.5-flash",
+            model=MODEL_NAME,
             contents=[user_caption, image],
         )
         await update.message.reply_text(response.text)
@@ -77,7 +79,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
 
-    # drop_pending_updates=True يحل مشكلة الـ Conflict فوراً
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

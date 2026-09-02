@@ -5,6 +5,7 @@ import urllib.parse
 import base64
 from collections import defaultdict
 from flask import Flask
+import httpx
 from openai import AsyncOpenAI
 from telegram import Update
 from telegram.ext import (
@@ -15,7 +16,6 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب لإبقاء البوت نشطاً على Render
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -26,7 +26,6 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# جلب المفاتيح
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
@@ -37,7 +36,6 @@ client = AsyncOpenAI(
 
 TARGET_MODEL = "openrouter/auto"
 
-# ذاكرة المحادثات
 user_memory = defaultdict(list)
 MAX_HISTORY = 6
 
@@ -48,7 +46,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "اهلا وسهلا بك يا غالي في بوت الذكاء الصناعي Ai Joud 🌟\n\n"
         "⚡️ **القدرات المتاحة:**\n"
         "💬 **سياق ذكي:** أتذكر تفاصيل حديثك وأفهم ما تشير إليه.\n"
-        "🎨 **تصميم صور دقيق:** اطلب مباشرة: *صمم صورة أسد في غابة* وسأرسمها بأعلى جودة.\n"
+        "🎨 **تصميم صور دقيق:** اطلب مباشرة: *صمم صورة...* وسأرسمها بجودة عالية.\n"
         "🖼️ **تحليل الصور:** أرسل أي صورة وسأشرح محتواها بالكامل.\n"
         "🔄 **بدء محادثة جديدة:** أرسل الأمر /reset في أي وقت."
     )
@@ -59,40 +57,46 @@ async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_memory[user_id].clear()
     await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، يمكنك بدء محادثة جديدة الآن!")
 
-# توليد الصور مع تحسين الوصف وترجمته تلقائياً للإنجليزية
+# توليد الصور عبر محرك Flux المتقدم مع تفادي انتهاء المهلة
 async def generate_and_send_image(prompt: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
         
-        # تحويل الوصف لبرومبت إنجليزي فائق الدقة
+        # ترجمة وصياغة برومبت إنجليزي فائق الوضوح للفصل بين العناصر
         trans_res = await client.chat.completions.create(
             extra_headers={"HTTP-Referer": "https://render.com", "X-Title": "Ai Joud Pro Bot"},
             model=TARGET_MODEL,
             messages=[
-                {"role": "system", "content": "Translate the user's image request to an accurate, highly detailed English prompt for an image generator (like Flux/Stable Diffusion). Output ONLY the English prompt, without any introduction or quotes."},
+                {"role": "system", "content": "Convert the user request into a precise English prompt for Flux image model. Clearly describe each animal and element separated in the scene. Output ONLY the English prompt text without quotes."},
                 {"role": "user", "content": prompt}
             ]
         )
         english_prompt = trans_res.choices[0].message.content.strip()
 
         encoded_prompt = urllib.parse.quote(english_prompt)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&seed={os.urandom(2).hex()}"
-        
-        await update.message.reply_photo(
-            photo=image_url,
-            caption=f"🎨 تم تصميم الصورة لـ: *{prompt}*",
-            parse_mode="Markdown"
-        )
+        # استخدام محرك flux الصريح لضمان أعلى واقعية وفصل دقيق للعناصر
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true"
+
+        # تنزيل الصورة بمهلة كافية ثم رفعها مباشرة لتجنب خطأ Timed out
+        async with httpx.AsyncClient(timeout=60.0) as http_client:
+            res = await http_client.get(image_url)
+            if res.status_code == 200:
+                await update.message.reply_photo(
+                    photo=res.content,
+                    caption=f"🎨 تم تصميم الصورة لـ: *{prompt}*",
+                    parse_mode="Markdown"
+                )
+            else:
+                await update.message.reply_text("تعذر إنشاء الصورة من الخادم، يرجى المحاولة لاحقاً.")
     except Exception as e:
-        await update.message.reply_text(f"تعذر تصميم الصورة: {e}")
+        await update.message.reply_text(f"حدث خطأ أثناء التصميم: {e}")
         print(f"Draw Error: {e}")
 
-# معالجة النصوص والمحادثات مع الذاكرة
+# معالجة النصوص والمحادثات
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text.strip()
 
-    # كلمات التحفيز للرسم
     image_triggers = [
         r"^(صمم|صمملي|صمم لي)\s+(صورة|صوره)?\s*(.*)",
         r"^(ارسم|ارسملي|ارسم لي)\s+(صورة|صوره)?\s*(.*)",
@@ -119,7 +123,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_memory[user_id] = user_memory[user_id][-MAX_HISTORY:]
 
         messages = [
-            {"role": "system", "content": "أنت مساعد ذكي ولطيف اسمه Ai Joud. تجيب بدقة ووضوح وباللغة العربية الفصحى أو بلهجة المستخدم الودية."}
+            {"role": "system", "content": "أنت مساعد ذكي ولطيف اسمه Ai Joud. تجيب بدقة واحترافية وباللغة العربية الفصحى أو بلهجة المستخدم الودية."}
         ] + user_memory[user_id]
 
         response = await client.chat.completions.create(
@@ -136,7 +140,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"حدث خطأ أثناء المعالجة: {e}")
         print(f"Chat Error: {e}")
 
-# تحليل الصور المرسلة
+# تحليل الصور
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل والوضوح، واذكر أهم العناصر الظاهرة فيها."
     try:
@@ -178,5 +182,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud Ultimate is running...")
+    print("Ai Joud Ultimate Flux is running...")
     app.run_polling(drop_pending_updates=True)

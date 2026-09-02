@@ -1,7 +1,6 @@
 import os
 import threading
 import base64
-from io import BytesIO
 from flask import Flask
 from openai import AsyncOpenAI
 from telegram import Update
@@ -31,8 +30,8 @@ client = AsyncOpenAI(
     api_key=OPENROUTER_API_KEY,
 )
 
-# نماذج مجانية فائقة الاستقرار والسرعة على OpenRouter
-TARGET_MODEL = "meta-llama/llama-3.2-3b-instruct:free"
+# التوجيه الذكي الذي يختار تلقائياً أفضل وأسرع نموذج مجاني متاح
+TARGET_MODEL = "openrouter/auto"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
@@ -58,8 +57,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
     except Exception as e:
-        # طباعة الخطأ في تلغرام لمعرفة السبب بدقة
-        await update.message.reply_text(f"خطأ OpenRouter: {e}")
+        await update.message.reply_text(f"خطأ: {e}")
         print(f"Text Error: {e}")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,5 +102,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud OpenRouter running...")
+    print("Ai Joud Auto-Router running...")
     app.run_polling(drop_pending_updates=True)

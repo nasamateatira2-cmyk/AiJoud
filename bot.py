@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 import urllib.parse
 import base64
@@ -61,7 +62,7 @@ async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_memory[user_id].clear()
     await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، تفضل بسؤالك الجديد!")
 
-# توليد الصور مع إضافة توقيع التطوير
+# توليد الصور بدقة عالية مع خادم بديل تلقائي
 async def generate_and_send_image(prompt: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = None
     try:
@@ -110,7 +111,7 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
                 if status_msg:
                     await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
             else:
-                # محرك بديل فوري في حال تعثر سيرفر الـ API
+                # خادم بديل فوري في حال تعثر الاتصال بـ Hugging Face
                 encoded = urllib.parse.quote(english_prompt)
                 fallback_url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true"
                 fb_res = await http_client.get(fallback_url)
@@ -139,7 +140,7 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
             )
         print(f"Pipeline Error: {e}")
 
-# معالجة الرسائل النصية
+# معالجة الرسائل وفلترة طلبات الرسم مع حماية الكلمات الأصلية
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text.strip()
@@ -158,10 +159,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_text.startswith(kw):
             is_image_request = True
             clean_prompt = user_text[len(kw):].strip()
-            if clean_prompt.startswith("لـ") or clean_prompt.startswith("لا"):
-                clean_prompt = clean_prompt[1:].strip()
-            elif clean_prompt.startswith("عن"):
-                clean_prompt = clean_prompt[2:].strip()
+            # إزالة حروف الجر المنفصلة فقط (مثل: "عن " أو "لـ ") دون تخريب الكلمات الأصلية مثل "عنكبوت"
+            clean_prompt = re.sub(r'^(عن\s+|لـ\s*|ل\s+)', '', clean_prompt).strip()
             break
 
     if is_image_request and clean_prompt:

@@ -16,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب داخلي لإبقاء البوت نشطاً على Render
+# خادم ويب لإبقاء البوت نشطاً 24/7 على Render
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -27,7 +27,7 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# قراءة المفاتيح من Render
+# قراءة المفاتيح بأمان من Render
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -50,9 +50,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌟 **تم التطوير من قبل أبو الجود** 🌟\n\n"
         "أهلاً وسهلاً بك في بوت **Ai Joud** الذكي!\n\n"
         "⚡️ **المميزات المتوفرة:**\n"
-        "💬 **محادثة ذكية:** يتذكر سياق الحوار بدقة.\n"
-        "🎨 **توليد الصور:** اكتب مثلاً: *صمم صورة أسد وغزال في الغابة*.\n"
-        "🖼️ **تحليل الصور:** أرسل أي صورة وسأشرحها لك.\n"
+        "💬 **محادثة ذكية مع ذاكرة:** أرسل أي سؤال وسيتذكر سياق الحوار.\n"
+        "🎨 **توليد وتصميم الصور:** اكتب مثلاً: *صمم عنكبوت أسود فوق لابتوب* أو *ارسم صورة أسد وغزال*.\n"
+        "🖼️ **تحليل الصور:** أرسل أي صورة وسأشرحها لك بالتفصيل.\n"
         "🔄 **بدء محادثة جديدة:** استخدم الأمر /reset."
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
@@ -62,7 +62,7 @@ async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_memory[user_id].clear()
     await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، تفضل بسؤالك الجديد!")
 
-# توليد الصور بدقة عالية مع خادم بديل تلقائي
+# توليد الصور مع ترجمة دقيقة ومحرك بديل فوري
 async def generate_and_send_image(prompt: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = None
     try:
@@ -111,7 +111,7 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
                 if status_msg:
                     await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
             else:
-                # خادم بديل فوري في حال تعثر الاتصال بـ Hugging Face
+                # خادم بديل تلقائي في حال انشغال السيرفر الأول
                 encoded = urllib.parse.quote(english_prompt)
                 fallback_url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true"
                 fb_res = await http_client.get(fallback_url)
@@ -128,7 +128,7 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
                         await context.bot.edit_message_text(
                             chat_id=update.effective_chat.id,
                             message_id=status_msg.message_id,
-                            text="❌ تعذر معالجة الصورة حالياً، يرجى المحاولة بعد لحظات."
+                            text="❌ تعذر معالجة الصورة حالياً، يرجى المحاولة بعد قليل."
                         )
 
     except Exception as e:
@@ -140,32 +140,20 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
             )
         print(f"Pipeline Error: {e}")
 
-# معالجة الرسائل وفلترة طلبات الرسم مع حماية الكلمات الأصلية
+# معالجة الرسائل وفلترة طلبات الرسم بدقة عالية ومرونة
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text.strip()
 
-    image_keywords = [
-        "صمم صورة", "صمملي صورة", "صمم لي صورة",
-        "ارسم صورة", "ارسملي صورة", "ارسم لي صورة",
-        "صمم صوره", "صمملي صوره", "ارسم صوره", "ارسملي صوره",
-        "توليد صورة", "انشاء صورة", "انشئ صورة", "اعمل صورة", "ساوي صورة"
-    ]
+    # التقاط صيغ الرسم سواء ذُكرت كلمة (صورة) أم لا، مع الحفاظ على كلمات مثل "عنكبوت"
+    pattern = r'^(صمم|صمملي|صمم\s+لي|ارسم|ارسملي|ارسم\s+لي|توليد|انشاء|انشئ|اعمل|ساوي)(\s+صورة|\s+صوره)?\s*(عن\s+|لـ\s*|ل\s+)?(.*)'
+    match = re.match(pattern, user_text, re.IGNORECASE)
 
-    is_image_request = False
-    clean_prompt = user_text
-
-    for kw in image_keywords:
-        if user_text.startswith(kw):
-            is_image_request = True
-            clean_prompt = user_text[len(kw):].strip()
-            # إزالة حروف الجر المنفصلة فقط (مثل: "عن " أو "لـ ") دون تخريب الكلمات الأصلية مثل "عنكبوت"
-            clean_prompt = re.sub(r'^(عن\s+|لـ\s*|ل\s+)', '', clean_prompt).strip()
-            break
-
-    if is_image_request and clean_prompt:
-        await generate_and_send_image(clean_prompt, update, context)
-        return
+    if match:
+        clean_prompt = match.group(4).strip()
+        if clean_prompt:
+            await generate_and_send_image(clean_prompt, update, context)
+            return
 
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -196,7 +184,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"حدث خطأ أثناء المحادثة: {e}")
         print(f"Chat Error: {e}")
 
-# تحليل الصور
+# تحليل وقراءة الصور
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل وبشكل دقيق."
     try:
@@ -237,5 +225,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud Bot is running with Abu Al-Joud branding...")
+    print("Ai Joud Bot is fully operational...")
     app.run_polling(drop_pending_updates=True)

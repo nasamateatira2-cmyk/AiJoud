@@ -1,5 +1,6 @@
 import os
 import threading
+import urllib.parse
 import base64
 from collections import defaultdict
 from flask import Flask
@@ -14,18 +15,18 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب لإبقاء البوت نشطاً 24/7 على Render
+# خادم ويب داخلي لإبقاء البوت نشطاً على Render
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Ai Joud Pro is Running with FLUX Engine!"
+    return "Ai Joud Pro is Running 24/7!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# قراءة المفاتيح بأمان من Render
+# قراءة المفاتيح من Render
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -45,12 +46,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_memory[user_id].clear()
     welcome_text = (
-        "أهلاً وسهلاً بك في بوت Ai Joud 🌟\0\1"
-         " تم تطوير البوت من قبل ابو الجود 🌟\M\A"
+        "🌟 **تم التطوير من قبل أبو الجود** 🌟\n\n"
+        "أهلاً وسهلاً بك في بوت **Ai Joud** الذكي!\n\n"
         "⚡️ **المميزات المتوفرة:**\n"
-        "💬 **محادثة ذكية مع ذاكرة:** أرسل أي سؤال وسيتذكر سياق الحوار.\n"
-        "🎨 **توليد صور FLUX عالية الدقة:** اكتب مثلاً: *صمم صورة أسد وغزال في وضح النهار*.\n"
-        "🖼️ **تحليل الصور:** أرسل صورة مع سؤالك وسأشرحها لك.\n"
+        "💬 **محادثة ذكية:** يتذكر سياق الحوار بدقة.\n"
+        "🎨 **توليد الصور:** اكتب مثلاً: *صمم صورة أسد وغزال في الغابة*.\n"
+        "🖼️ **تحليل الصور:** أرسل أي صورة وسأشرحها لك.\n"
         "🔄 **بدء محادثة جديدة:** استخدم الأمر /reset."
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
@@ -60,19 +61,18 @@ async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_memory[user_id].clear()
     await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، تفضل بسؤالك الجديد!")
 
-# توليد الصور باستخدام محرك FLUX.1 عبر Hugging Face
+# توليد الصور مع إضافة توقيع التطوير
 async def generate_and_send_image(prompt: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status_msg = None
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        status_msg = await update.message.reply_text("⏳ جاري ترجمة المشهد ورسمه بدقة عالية عبر محرك FLUX...")
+        status_msg = await update.message.reply_text("⏳ جاري صياغة وتوليد المشهد بدقة عالية، اذكر الله...")
 
-        # ترجمة وضبط الموجه بدقة فائقة عبر الذكاء الاصطناعي
         system_instruction = (
-            "You are an expert prompt engineer for Flux.1 image generation. "
-            "Convert the user's Arabic prompt into a clean, detailed, and high-quality English visual description. "
-            "Ensure ALL requested objects, animals, and background details are preserved. "
-            "Focus on photorealistic daylight, vibrant colors, sharp focus, 8k resolution. "
-            "Output ONLY the English prompt string without quotes, explanations, or notes."
+            "You are an expert prompt engineer. "
+            "Convert the user's Arabic description into a single cohesive, highly detailed English prompt for SDXL / Flux. "
+            "Ensure ALL requested objects and details are explicitly described. "
+            "Output ONLY the English prompt string, no quotes or notes."
         )
 
         trans_res = await client.chat.completions.create(
@@ -84,35 +84,60 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
             ]
         )
         english_prompt = trans_res.choices[0].message.content.strip().replace('"', '').replace("'", "")
-        print(f"HF FLUX Prompt: {english_prompt}")
+        print(f"Final Image Prompt: {english_prompt}")
 
-        # استدعاء نموذج FLUX.1-schnell من Hugging Face
-        hf_api_url = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
-        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        api_url = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
+        headers = {
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/json"
+        }
         payload = {"inputs": english_prompt}
 
-        async with httpx.AsyncClient(timeout=90.0) as http_client:
-            response = await http_client.post(hf_api_url, headers=headers, json=payload)
+        caption_text = (
+            f"🎨 **الطلب:** {prompt}\n\n"
+            f"✨ **تم التطوير بواسطة:** أبو الجود"
+        )
+
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as http_client:
+            response = await http_client.post(api_url, headers=headers, json=payload)
 
             if response.status_code == 200 and len(response.content) > 5000:
                 await update.message.reply_photo(
                     photo=response.content,
-                    caption=f"🎨 **الطلب:** {prompt}\n⚡️ **المحرك:** FLUX.1 (Hugging Face)",
+                    caption=caption_text,
                     parse_mode="Markdown"
                 )
-                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
+                if status_msg:
+                    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
             else:
-                # إذا كان السيرفر مشغولاً أو استجاب برمز خطأ
-                await context.bot.edit_message_text(
-                    chat_id=update.effective_chat.id,
-                    message_id=status_msg.message_id,
-                    text="❌ لم يتمكن السيرفر من معالجة الصورة في الوقت الحالي، أعد المحاولة بعد لحظات."
-                )
-                print(f"HF Error Status: {response.status_code}, Details: {response.text}")
+                # محرك بديل فوري في حال تعثر سيرفر الـ API
+                encoded = urllib.parse.quote(english_prompt)
+                fallback_url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true"
+                fb_res = await http_client.get(fallback_url)
+                if fb_res.status_code == 200 and len(fb_res.content) > 5000:
+                    await update.message.reply_photo(
+                        photo=fb_res.content,
+                        caption=caption_text,
+                        parse_mode="Markdown"
+                    )
+                    if status_msg:
+                        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
+                else:
+                    if status_msg:
+                        await context.bot.edit_message_text(
+                            chat_id=update.effective_chat.id,
+                            message_id=status_msg.message_id,
+                            text="❌ تعذر معالجة الصورة حالياً، يرجى المحاولة بعد لحظات."
+                        )
 
     except Exception as e:
-        await update.message.reply_text(f"حدث خطأ أثناء الرسم: {e}")
-        print(f"Image Pipeline Error: {e}")
+        if status_msg:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id,
+                text=f"❌ حدث خطأ أثناء المعالجة: {e}"
+            )
+        print(f"Pipeline Error: {e}")
 
 # معالجة الرسائل النصية
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,7 +158,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_text.startswith(kw):
             is_image_request = True
             clean_prompt = user_text[len(kw):].strip()
-            # تنظيف حروف الجر الزائدة في بداية الطلب
             if clean_prompt.startswith("لـ") or clean_prompt.startswith("لا"):
                 clean_prompt = clean_prompt[1:].strip()
             elif clean_prompt.startswith("عن"):
@@ -144,7 +168,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await generate_and_send_image(clean_prompt, update, context)
         return
 
-    # الردود الذكية العادية مع الذاكرة
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
@@ -152,9 +175,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(user_memory[user_id]) > MAX_HISTORY:
             user_memory[user_id] = user_memory[user_id][-MAX_HISTORY:]
 
-        messages = [
-            {"role": "system", "content": "أنت مساعد ذكي ولطيف اسمه Ai Joud. تجيب باحترافية، وضوح، وتفصيل مفيد باللغة العربية."}
-        ] + user_memory[user_id]
+        system_prompt = (
+            "أنت مساعد ذكي ومحترف اسمه Ai Joud. "
+            "تم تطويرك وبرمجتك بواسطة المطور (أبو الجود). "
+            "أجب دائماً بلباقة ووضوح ودقة عالية باللغة العربية."
+        )
+
+        messages = [{"role": "system", "content": system_prompt}] + user_memory[user_id]
 
         response = await client.chat.completions.create(
             extra_headers={"HTTP-Referer": "https://render.com", "X-Title": "Ai Joud Pro"},
@@ -211,5 +238,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud with FLUX is running smoothly...")
+    print("Ai Joud Bot is running with Abu Al-Joud branding...")
     app.run_polling(drop_pending_updates=True)

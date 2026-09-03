@@ -1,7 +1,5 @@
 import os
-import re
 import threading
-import base64
 from collections import defaultdict
 from flask import Flask
 from openai import AsyncOpenAI
@@ -34,9 +32,9 @@ client = AsyncOpenAI(
     api_key=OPENROUTER_API_KEY,
 )
 
-# نماذج المعالجة المعتمدة
+# نموذج الدردشة الذكي والمستقر
 CHAT_MODEL = "openrouter/auto"
-VISION_MODEL = "google/gemini-2.0-flash-lite-preview-02-05:free"
+
 # إدارة ذاكرة المحادثة لكل مستخدم
 user_memory = defaultdict(list)
 MAX_HISTORY = 6
@@ -48,10 +46,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌟 **تم التطوير من قبل أبو الجود** 🌟\n\n"
         "أهلاً وسهلاً بك في بوت **Ai Joud** الذكي!\n\n"
         "⚡️ **المميزات المتوفرة:**\n"
-        "💬 **محادثة ذكية:** يتذكر سياق الحوار ويجيب على كافة الاستفسارات.\n"
-        "🖼️ **تحليل وقراءة الصور:** أرسل أي صورة وسأشرحها لك بالتفصيل.\n"
-        "🎨 **توليد الصور:** ميزة التصميم قيد التحديث والتطوير حالياً وستتوفر قريباً بأعلى جودة.\n"
-        "🔄 **بدء محادثة جديدة:** استخدم الأمر /reset."
+        "💬 **محادثة ذكية:** إجابات دقيقة وسريعة مع تذكر سياق الحوار بالكامل.\n"
+        "🔄 **بدء محادثة جديدة:** استخدم الأمر /reset لمسح الذاكرة.\n\n"
+        "✨ أرسل سؤالك أو استفسارك وسأجيبك فوراً!"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
@@ -60,7 +57,7 @@ async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_memory[user_id].clear()
     await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، تفضل بسؤالك الجديد!")
 
-# معالجة النصوص واعتراض طلبات توليد الصور
+# معالجة النصوص واعتراض طلبات تصميم الصور
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text.strip()
@@ -73,14 +70,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_image_request:
         notice_text = (
-            "🎨 **ميزة توليد وتصميم الصور قيد التطوير حالياً.**\n\n"
-            "نعمل على ترقية المحرك لتقديم نتائج فائقة الدقة والاحترافية، وستتوفر هذه الميزة قريباً جداً بإذن الله! ✨\n\n"
-            "يمكنك حالياً الاستفادة من المحادثة الذكية وتحليل الصور المرسلة بشكل كامل."
+            "🎨 **ميزة توليد وتصميم الصور قيد التطوير والتحديث حالياً.**\n\n"
+            "ستتوفر قريباً بإذن الله بجودة عالية! ✨\n"
+            "يمكنك حالياً الاستفادة من المحادثة الذكية والإجابة عن كافة استفساراتك."
         )
         await update.message.reply_text(notice_text, parse_mode="Markdown")
         return
 
-    # المحادثة الذكية العادية
+    # المحادثة الذكية
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
@@ -91,7 +88,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         system_prompt = (
             "أنت مساعد ذكي ومحترف اسمه Ai Joud. "
             "تم تطويرك وبرمجتك بواسطة المطور (أبو الجود). "
-            "أجب دائماً بلباقة ووضوح ودقة عالية باللغة العربية."
+            "أجب دائماً بلباقة ووضوح ودقة باللغة العربية."
         )
 
         messages = [{"role": "system", "content": system_prompt}] + user_memory[user_id]
@@ -111,39 +108,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"حدث خطأ أثناء المحادثة: {e}")
         print(f"Chat Error: {e}")
 
-# قراءة وتحليل الصور بدقة
+# اعتراض إرسال الصور والرد بلباقة دون استدعاء أي نموذج يسبب أخطاء
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل وبشكل دقيق باللغة العربية."
-    try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-
-        photo_file = await update.message.photo[-1].get_file()
-        photo_bytes = await photo_file.download_as_bytearray()
-        base64_image = base64.b64encode(photo_bytes).decode('utf-8')
-
-        response = await client.chat.completions.create(
-            extra_headers={"HTTP-Referer": "https://render.com", "X-Title": "Ai Joud Pro"},
-            model=VISION_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_caption},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                        }
-                    ]
-                }
-            ],
-            max_tokens=1000
-        )
-        reply = response.choices[0].message.content
-        await update.message.reply_text(reply)
-
-    except Exception as e:
-        await update.message.reply_text(f"تعذر قراءة الصورة: {e}")
-        print(f"Vision Error: {e}")
+    reply_msg = (
+        "🖼️ **ميزة تحليل وقراءة الصور قيد الصيانة والتطوير حالياً.**\n\n"
+        "ستتوفر قريباً بدقة أعلى إن شاء الله! ✨\n"
+        "تفضل بطرح أي سؤال أو موضوع عبر الرسائل النصية وسأجيبك فوراً."
+    )
+    await update.message.reply_text(reply_msg, parse_mode="Markdown")
 
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
@@ -153,5 +125,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud Bot is live and stable...")
+    print("Ai Joud Bot is running stably in chat mode...")
     app.run_polling(drop_pending_updates=True)

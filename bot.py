@@ -34,9 +34,9 @@ client = AsyncOpenAI(
     api_key=OPENROUTER_API_KEY,
 )
 
-# نماذج المعالجة
+# نماذج المعالجة المعتمدة
 CHAT_MODEL = "openrouter/auto"
-VISION_MODEL = "google/gemini-2.0-flash-exp:free"
+VISION_MODEL = "meta-llama/llama-3.2-11b-vision-instruct:free"
 
 # إدارة ذاكرة المحادثة لكل مستخدم
 user_memory = defaultdict(list)
@@ -112,7 +112,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"حدث خطأ أثناء المحادثة: {e}")
         print(f"Chat Error: {e}")
 
-# قراءة وتحليل الصور بدقة وبدون أخطاء التوكنز
+# قراءة وتحليل الصور بدقة
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل وبشكل دقيق باللغة العربية."
     try:
@@ -137,7 +137,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ]
                 }
             ],
-            max_tokens=1500
+            max_tokens=1000
         )
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)

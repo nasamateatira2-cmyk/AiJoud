@@ -36,8 +36,7 @@ client = AsyncOpenAI(
 
 # نماذج المعالجة المعتمدة
 CHAT_MODEL = "openrouter/auto"
-VISION_MODEL = "meta-llama/llama-3.2-11b-vision-instruct:free"
-
+VISION_MODEL = "google/gemini-2.0-flash-lite-preview-02-05:free"
 # إدارة ذاكرة المحادثة لكل مستخدم
 user_memory = defaultdict(list)
 MAX_HISTORY = 6

@@ -1,12 +1,13 @@
 import os
 import re
 import threading
-import urllib.parse
+import asyncio
 import base64
 from collections import defaultdict
 from flask import Flask
-import httpx
 from openai import AsyncOpenAI
+from google import genai
+from google.genai import types
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -16,26 +17,32 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب داخلي لإبقاء البوت نشطاً على Render 24/7
+# خادم ويب لإبقاء البوت نشطاً 24/7 على Render
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Ai Joud Pro is Running 24/7!"
+    return "Ai Joud Pro is Running with Google Imagen 3!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# قراءة مفاتيح الربط من متغيرات البيئة
+# قراءة المفاتيح بأمان
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-HF_TOKEN = os.getenv("HF_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# عميل المحادثة النصية
 client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
 )
+
+# عميل Google لتوليد الصور
+gemini_client = None
+if GEMINI_API_KEY:
+    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 TARGET_MODEL = "openrouter/auto"
 
@@ -51,8 +58,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "أهلاً وسهلاً بك في بوت **Ai Joud** الذكي!\n\n"
         "⚡️ **المميزات المتوفرة:**\n"
         "💬 **محادثة ذكية:** يتذكر سياق الحوار بدقة.\n"
-        "🎨 **توليد وتصميم الصور:** اكتب مثلاً: *صمم عنكبوت أسود فوق لابتوب* أو *ارسم صورة أسد وغزال*.\n"
-        "🖼️ **تحليل الصور:** أرسل أي صورة وسأشرحها لك بالتفصيل.\n"
+        "🎨 **توليد صور واقعية فائقة الدقة (Google Imagen 3):** اكتب مثلاً: *صمم عنكبوت أسود فوق لابتوب*.\n"
+        "🖼️ **تحليل وقراءة الصور:** أرسل أي صورة وسأشرحها لك.\n"
         "🔄 **بدء محادثة جديدة:** استخدم الأمر /reset."
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
@@ -62,75 +69,52 @@ async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_memory[user_id].clear()
     await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، تفضل بسؤالك الجديد!")
 
-# توليد الصور مع ضبط الواقعية وتجنب الوحوش والرسوم المشوهة
+# توليد الصور الفائقة عبر Google Imagen 3
 async def generate_and_send_image(prompt: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = None
     try:
+        if not gemini_client:
+            await update.message.reply_text("❌ مفتاح GEMINI_API_KEY غير متصل، تأكد من إضافته في Render.")
+            return
+
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
-        status_msg = await update.message.reply_text("⏳ جاري صياغة وتوليد المشهد بدقة عالية، اذكر الله...")
+        status_msg = await update.message.reply_text("⏳ جاري إنشاء المشهد بواسطة Google Imagen 3، اذكر الله...")
 
-        system_instruction = (
-            "You are a master visual prompt engineer for photorealistic image generation. "
-            "Convert the user's Arabic description into a detailed English prompt following these STRICT rules:\n"
-            "1. Realism: Describe real-world creatures and objects with biological/physical accuracy (e.g., if a spider is requested, describe a real arachnid with 8 jointed legs, realistic hairy texture, realistic eyes, sitting on a real laptop).\n"
-            "2. Avoid fantasy monsters, demons, evil spirits, or cartoon styles unless explicitly asked for fantasy.\n"
-            "3. Visuals: Macro photography, crisp natural lighting, depth of field, 8k resolution, National Geographic style.\n"
-            "4. Output ONLY the raw English prompt without any quotes or explanations."
-        )
+        # دالة الاستدعاء المباشر لنموذج Imagen 3
+        def call_imagen():
+            return gemini_client.models.generate_images(
+                model='imagen-3.0-generate-002',
+                prompt=f"A photorealistic, highly detailed, real life photograph of: {prompt}. Natural lighting, 8k resolution, cinematic atmosphere, sharp focus, wide shot.",
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio="1:1"
+                )
+            )
 
-        trans_res = await client.chat.completions.create(
-            extra_headers={"HTTP-Referer": "https://render.com", "X-Title": "Ai Joud Pro"},
-            model=TARGET_MODEL,
-            messages=[
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        english_prompt = trans_res.choices[0].message.content.strip().replace('"', '').replace("'", "")
-        print(f"Realistic Prompt: {english_prompt}")
-
-        api_url = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
-        headers = {
-            "Authorization": f"Bearer {HF_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        payload = {"inputs": english_prompt}
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, call_imagen)
 
         caption_text = (
             f"🎨 **الطلب:** {prompt}\n\n"
             f"✨ **تم التطوير بواسطة:** أبو الجود"
         )
 
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as http_client:
-            response = await http_client.post(api_url, headers=headers, json=payload)
-
-            if response.status_code == 200 and len(response.content) > 5000:
-                await update.message.reply_photo(
-                    photo=response.content,
-                    caption=caption_text,
-                    parse_mode="Markdown"
+        if result.generated_images:
+            image_bytes = result.generated_images[0].image.image_bytes
+            await update.message.reply_photo(
+                photo=image_bytes,
+                caption=caption_text,
+                parse_mode="Markdown"
+            )
+            if status_msg:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
+        else:
+            if status_msg:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=status_msg.message_id,
+                    text="❌ تعذر توليد الصورة، يرجى تجربة وصف آخر."
                 )
-                if status_msg:
-                    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
-            else:
-                encoded = urllib.parse.quote(english_prompt)
-                fallback_url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1024&height=1024&nologo=true"
-                fb_res = await http_client.get(fallback_url)
-                if fb_res.status_code == 200 and len(fb_res.content) > 5000:
-                    await update.message.reply_photo(
-                        photo=fb_res.content,
-                        caption=caption_text,
-                        parse_mode="Markdown"
-                    )
-                    if status_msg:
-                        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_msg.message_id)
-                else:
-                    if status_msg:
-                        await context.bot.edit_message_text(
-                            chat_id=update.effective_chat.id,
-                            message_id=status_msg.message_id,
-                            text="❌ تعذر معالجة الصورة حالياً، يرجى المحاولة بعد لحظات."
-                        )
 
     except Exception as e:
         if status_msg:
@@ -139,9 +123,9 @@ async def generate_and_send_image(prompt: str, update: Update, context: ContextT
                 message_id=status_msg.message_id,
                 text=f"❌ حدث خطأ أثناء المعالجة: {e}"
             )
-        print(f"Pipeline Error: {e}")
+        print(f"Imagen Pipeline Error: {e}")
 
-# معالجة الرسائل النصية وفرز أوامر التصميم
+# معالجة الرسائل وفلترة أوامر الرسم بمرونة تامة
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text.strip()
@@ -184,7 +168,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"حدث خطأ أثناء المحادثة: {e}")
         print(f"Chat Error: {e}")
 
-# تحليل وقراءة الصور
+# قراءة وتحليل الصور
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل وبشكل دقيق."
     try:
@@ -225,5 +209,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud Bot is running with Abu Al-Joud branding...")
+    print("Ai Joud Bot is running with Google Imagen 3...")
     app.run_polling(drop_pending_updates=True)

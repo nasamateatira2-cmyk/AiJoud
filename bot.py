@@ -14,30 +14,31 @@ from telegram.ext import (
     filters,
 )
 
-# خادم ويب داخلي لإبقاء البوت نشطاً 24/7 على Render
+# خادم داخلي لإبقاء البوت نشطاً على Render مدار الساعة
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Ai Joud Pro is Running 24/7!"
+    return "Ai Joud is Running 24/7!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# قراءة المفاتيح الأساسية
+# قراءة مفاتيح التشغيل من متغيرات البيئة
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# عميل الذكاء الاصطناعي للمحادثة والتحليل
 client = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
 )
 
-TARGET_MODEL = "openrouter/auto"
+# نماذج المعالجة
+CHAT_MODEL = "openrouter/auto"
+VISION_MODEL = "google/gemini-2.0-flash-exp:free"
 
-# ذاكرة المحادثة للمستخدمين
+# إدارة ذاكرة المحادثة لكل مستخدم
 user_memory = defaultdict(list)
 MAX_HISTORY = 6
 
@@ -48,7 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌟 **تم التطوير من قبل أبو الجود** 🌟\n\n"
         "أهلاً وسهلاً بك في بوت **Ai Joud** الذكي!\n\n"
         "⚡️ **المميزات المتوفرة:**\n"
-        "💬 **محادثة ذكية وسريعة:** يتذكر سياق الحوار ويجيب على كافة الأسئلة بدقة.\n"
+        "💬 **محادثة ذكية:** يتذكر سياق الحوار ويجيب على كافة الاستفسارات.\n"
         "🖼️ **تحليل وقراءة الصور:** أرسل أي صورة وسأشرحها لك بالتفصيل.\n"
         "🎨 **توليد الصور:** ميزة التصميم قيد التحديث والتطوير حالياً وستتوفر قريباً بأعلى جودة.\n"
         "🔄 **بدء محادثة جديدة:** استخدم الأمر /reset."
@@ -60,25 +61,27 @@ async def reset_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_memory[user_id].clear()
     await update.message.reply_text("🔄 تم مسح الذاكرة بنجاح، تفضل بسؤالك الجديد!")
 
-# معالجة الرسائل النصية والتقاط طلبات الصور
+# معالجة النصوص واعتراض طلبات توليد الصور
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_text = update.message.text.strip()
 
-    # فحص إذا كانت الرسالة طلباً لتصميم أو توليد صورة
-    triggers = ["صمم", "ارسم", "توليد", "انشئ", "انشاء", "ساوي صورة", "اعمل صورة", "صوره", "صورة"]
-    is_image_request = any(user_text.startswith(t) for t in ["صمم", "ارسم", "توليد", "انشئ", "ساوي", "اعمل"]) or ("صورة" in user_text and any(w in user_text for w in ["بدي", "اريد", "اعمللي", "صمملي", "ارسملي"]))
+    # رصد أوامر طلب الرسم والتصميم
+    is_image_request = (
+        any(user_text.startswith(t) for t in ["صمم", "ارسم", "توليد", "انشئ", "ساوي", "اعمل"]) or
+        ("صورة" in user_text and any(w in user_text for w in ["بدي", "اريد", "اعمللي", "صمملي", "ارسملي"]))
+    )
 
     if is_image_request:
         notice_text = (
             "🎨 **ميزة توليد وتصميم الصور قيد التطوير حالياً.**\n\n"
-            "نعمل على ترقية المحرك لتقديم نتائج احترافية وفائقة الدقة، وستتوفر هذه الميزة قريباً جداً بإذن الله! ✨\n\n"
+            "نعمل على ترقية المحرك لتقديم نتائج فائقة الدقة والاحترافية، وستتوفر هذه الميزة قريباً جداً بإذن الله! ✨\n\n"
             "يمكنك حالياً الاستفادة من المحادثة الذكية وتحليل الصور المرسلة بشكل كامل."
         )
         await update.message.reply_text(notice_text, parse_mode="Markdown")
         return
 
-    # معالجة المحادثة الذكية العادية
+    # المحادثة الذكية العادية
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
@@ -89,15 +92,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         system_prompt = (
             "أنت مساعد ذكي ومحترف اسمه Ai Joud. "
             "تم تطويرك وبرمجتك بواسطة المطور (أبو الجود). "
-            "أجب دائماً بأسلوب مهذب، واضح، ودقيق باللغة العربية."
+            "أجب دائماً بلباقة ووضوح ودقة عالية باللغة العربية."
         )
 
         messages = [{"role": "system", "content": system_prompt}] + user_memory[user_id]
 
         response = await client.chat.completions.create(
             extra_headers={"HTTP-Referer": "https://render.com", "X-Title": "Ai Joud Pro"},
-            model=TARGET_MODEL,
-            messages=messages
+            model=CHAT_MODEL,
+            messages=messages,
+            max_tokens=1000
         )
 
         reply = response.choices[0].message.content
@@ -108,9 +112,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"حدث خطأ أثناء المحادثة: {e}")
         print(f"Chat Error: {e}")
 
-# قراءة وتحليل الصور المرسلة
+# قراءة وتحليل الصور بدقة وبدون أخطاء التوكنز
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل وبشكل دقيق."
+    user_caption = update.message.caption or "اشرح هذه الصورة بالتفصيل وبشكل دقيق باللغة العربية."
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
@@ -120,7 +124,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         response = await client.chat.completions.create(
             extra_headers={"HTTP-Referer": "https://render.com", "X-Title": "Ai Joud Pro"},
-            model=TARGET_MODEL,
+            model=VISION_MODEL,
             messages=[
                 {
                     "role": "user",
@@ -132,7 +136,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         }
                     ]
                 }
-            ]
+            ],
+            max_tokens=1500
         )
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
@@ -149,5 +154,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-    print("Ai Joud Bot is running stably...")
+    print("Ai Joud Bot is live and stable...")
     app.run_polling(drop_pending_updates=True)
